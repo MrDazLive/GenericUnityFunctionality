@@ -23,6 +23,7 @@ sysinfo.txt
 # Additional ignores
 /[Pp]roject[Ss]ettings/
 **/[Ll]ocal/
+**/[Ll]ocal.meta
 *.unity
 *.unity.meta
 
