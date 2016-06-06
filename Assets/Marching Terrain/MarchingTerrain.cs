@@ -1,4 +1,5 @@
 ﻿using UnityEngine;
+using System.Threading;
 using System.Collections.Generic;
 
 public class MarchingTerrain : MonoBehaviour {
@@ -26,6 +27,9 @@ public class MarchingTerrain : MonoBehaviour {
     private Node[][] node;
     private MeshFilter[][] patch;
 
+    private Vector2 patchDimensions = new Vector2();
+    private Vector2 nodeDimensions = new Vector2();
+
     public void Start()
     {
         producePatches();
@@ -48,15 +52,15 @@ public class MarchingTerrain : MonoBehaviour {
             Destroy(child.gameObject);
         }
 
-        Vector2 dimension = new Vector2();
-        dimension.x = (int)Mathf.Ceil(dimensions.x / meschScale / dimensionCap);
-        dimension.y = (int)Mathf.Ceil(dimensions.z / meschScale / dimensionCap);
+        patchDimensions = new Vector2();
+        patchDimensions.x = (int)Mathf.Ceil(dimensions.x / meschScale / dimensionCap);
+        patchDimensions.y = (int)Mathf.Ceil(dimensions.z / meschScale / dimensionCap);
 
-        patch = new MeshFilter[(int)dimension.x][];
-        for (int i = 0; i < (int)dimension.x; i++)
+        patch = new MeshFilter[(int)patchDimensions.x][];
+        for (int i = 0; i < (int)patchDimensions.x; i++)
         {
-            patch[i] = new MeshFilter[(int)dimension.y];
-            for (int j = 0; j < (int)dimension.y; j++)
+            patch[i] = new MeshFilter[(int)patchDimensions.y];
+            for (int j = 0; j < (int)patchDimensions.y; j++)
             {
                 GameObject c = new GameObject();
                 c.transform.parent = gameObject.transform;
@@ -69,21 +73,23 @@ public class MarchingTerrain : MonoBehaviour {
 
     private void produceNodes()
     {
-        Vector2 dimension = new Vector2();
-        dimension.x = (int)Mathf.Ceil(dimensions.x / meschScale) + 1;
-        dimension.y = (int)Mathf.Ceil(dimensions.z / meschScale) + 1;
+        nodeDimensions.x = (int)Mathf.Ceil(dimensions.x / meschScale) + 1;
+        nodeDimensions.y = (int)Mathf.Ceil(dimensions.z / meschScale) + 1;
 
-        node = new Node[(int)dimension.x][];
-        for (int i = 0; i < (int)dimension.x; i++)
+        node = new Node[(int)nodeDimensions.x][];
+        for (int i = 0; i < (int)nodeDimensions.x; i++)
         {
-            node[i] = new Node[(int)dimension.y];
+            node[i] = new Node[(int)nodeDimensions.y];
             float x = i * meschScale;
-            for (int j = 0; j < (int)dimension.y; j++)
+            for (int j = 0; j < (int)nodeDimensions.y; j++)
             {
                 float y = j * meschScale;
-                float perlin = Mathf.PerlinNoise((float)i / perlinScale, (float)j / perlinScale);
+                float perlin = Mathf.PerlinNoise(
+                    (float)i / perlinScale + transform.position.x,
+                    (float)j / perlinScale + transform.position.z);
                 node[i][j] = new Node();
                 node[i][j].position = new Vector3(x, perlin * dimensions.y, y);
+                node[i][j].position += transform.position;
 
                 node[i][j].enabled = invertPerlin ?
                     perlin < perlinDensity :
@@ -94,47 +100,14 @@ public class MarchingTerrain : MonoBehaviour {
 
     private void produceMeshes()
     {
-        Vector2 n_dimension = new Vector2();
-        n_dimension.x = (int)Mathf.Ceil(dimensions.x / meschScale);
-        n_dimension.y = (int)Mathf.Ceil(dimensions.z / meschScale);
-        Vector2 p_dimension = new Vector2();
-        p_dimension.x = (int)Mathf.Ceil(dimensions.x / meschScale / dimensionCap);
-        p_dimension.y = (int)Mathf.Ceil(dimensions.z / meschScale / dimensionCap);
+        nodeDimensions.x = (int)Mathf.Ceil(dimensions.x / meschScale);
+        nodeDimensions.y = (int)Mathf.Ceil(dimensions.z / meschScale);
 
-        for (int i = 0; i < (int)p_dimension.x; i++)
+        for (int i = 0; i < (int)patchDimensions.x; i++)
         {
-            for (int j = 0; j < (int)p_dimension.y; j++)
+            for (int j = 0; j < (int)patchDimensions.y; j++)
             {
-                MarchingMesh m = new MarchingMesh();
-                m.vertices = new List<Vector3>();
-                m.triangles = new List<int>(); 
-
-                int rowStart = i * dimensionCap;
-                int rowCap = rowStart + dimensionCap;
-                for (int x = rowStart; x < rowCap && x < (int)n_dimension.x; x++)
-                {
-                    int colStart = j * dimensionCap;
-                    int colCap = colStart + dimensionCap;
-                    for (int y = colStart; y < colCap && y < (int)n_dimension.y; y++)
-                    {
-                        MarchingMesh mm = MarchingSquare<Node>.GetMesh(new Node[4] {
-                                node[x][y],
-                                node[x + 1][y],
-                                node[x + 1][y + 1],
-                                node[x][y + 1]
-                            },
-                            (n) => { return n.position; },
-                            (n) => { return n.enabled; }
-                        );
-                        int offset = m.vertices.Count;
-                        for (int k = 0; k < mm.triangles.Count; k++)
-                        {
-                            mm.triangles[k] += offset;
-                        }
-                        m.vertices.AddRange(mm.vertices);
-                        m.triangles.AddRange(mm.triangles);
-                    }
-                }
+                MarchingMesh m = produceMesh(i, j);
 
                 Mesh mesh = new Mesh();
                 mesh.vertices = m.vertices.ToArray();
@@ -143,5 +116,41 @@ public class MarchingTerrain : MonoBehaviour {
                 patch[i][j].mesh = mesh;
             }
         }
+    }
+
+    private MarchingMesh produceMesh(int i, int j)
+    {
+        MarchingMesh m = new MarchingMesh();
+        m.vertices = new List<Vector3>();
+        m.triangles = new List<int>();
+
+        int rowStart = i * dimensionCap;
+        int rowCap = rowStart + dimensionCap;
+        for (int x = rowStart; x < rowCap && x < (int)nodeDimensions.x; x++)
+        {
+            int colStart = j * dimensionCap;
+            int colCap = colStart + dimensionCap;
+            for (int y = colStart; y < colCap && y < (int)nodeDimensions.y; y++)
+            {
+                MarchingMesh mm = MarchingSquare<Node>.GetMesh(new Node[4] {
+                                node[x][y],
+                                node[x + 1][y],
+                                node[x + 1][y + 1],
+                                node[x][y + 1]
+                            },
+                    (n) => { return n.position; },
+                    (n) => { return n.enabled; }
+                );
+                int offset = m.vertices.Count;
+                for (int k = 0; k < mm.triangles.Count; k++)
+                {
+                    mm.triangles[k] += offset;
+                }
+                m.vertices.AddRange(mm.vertices);
+                m.triangles.AddRange(mm.triangles);
+            }
+        }
+
+        return m;
     }
 }
